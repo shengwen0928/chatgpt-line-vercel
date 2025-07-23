@@ -6,7 +6,7 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import openai
 
-# ——— 新增的防呆檢查機制 ———
+# ——— 健壯的防呆檢查機制 ———
 # 1. 從環境中讀取所有需要的變數
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
@@ -21,9 +21,8 @@ if not LINE_CHANNEL_SECRET:
 if not OPENAI_API_KEY:
     missing_vars.append("OPENAI_API_KEY")
 
-# 3. 如果列表不是空的，代表有變數遺失，就拋出一個清晰的錯誤並停止程式
+# 3. 如果有任何變數遺失，就拋出一個清晰的錯誤並停止程式
 if missing_vars:
-    # 這個錯誤會清楚地顯示在 Vercel 的日誌中
     raise ValueError(f"FATAL ERROR: 以下環境變數遺失或為空: {', '.join(missing_vars)}")
 # ——— 檢查結束 ———
 
