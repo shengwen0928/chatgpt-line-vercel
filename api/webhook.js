@@ -8,8 +8,13 @@ const config = {
 
 const client = new Client(config);
 
-// Vercel handler
 export default async function handler(req, res) {
+  if (req.method === 'GET') {
+    // 瀏覽器訪問時回覆 OK
+    res.status(200).send('OK');
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).send('Method Not Allowed');
     return;
