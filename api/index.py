@@ -1,65 +1,42 @@
 import os
-from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import openai
+from flask import Flask, Response
 
 app = Flask(__name__)
 
-# 從環境變數讀取金鑰
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def catch_all(path):
+    # 讀取三個環境變數
+    token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+    secret = os.getenv('LINE_CHANNEL_SECRET')
+    openai_key = os.getenv('OPENAI_API_KEY')
 
-# 初始化 API
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
-openai.api_key = OPENAI_API_KEY
+    # 準備要顯示在網頁上的文字
+    html = """
+    <h1>Vercel 環境變數檢查</h1>
+    <p>這個頁面會顯示您的程式實際讀取到的環境變數是什麼。</p>
+    <hr>
+    """
 
-# Vercel 會將所有請求導向這個 Flask app
-# 我們建立一個 /api/ 路徑來處理 Webhook
-@app.route("/", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
+    # 檢查 LINE_CHANNEL_ACCESS_TOKEN
+    if token:
+        # 為了安全，只顯示前 5 個字和後 5 個字
+        html += f"<p><b>LINE_CHANNEL_ACCESS_TOKEN:</b> ✅ 找到了！ (開頭: {token[:5]}...{token[-5:]})</p>"
+    else:
+        html += "<p><b>LINE_CHANNEL_ACCESS_TOKEN:</b> ❌ 找不到 (None)</p>"
+
+    # 檢查 LINE_CHANNEL_SECRET
+    if secret:
+        html += f"<p><b>LINE_CHANNEL_SECRET:</b> ✅ 找到了！ (長度: {len(secret)})</p>"
+    else:
+        html += "<p><b>LINE_CHANNEL_SECRET:</b> ❌ 找不到 (None)</p>"
     
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    
-    return 'OK'
+    # 檢查 OPENAI_API_KEY
+    if openai_key:
+        html += f"<p><b>OPENAI_API_KEY:</b> ✅ 找到了！ (開頭: {openai_key[:5]}...)</p>"
+    else:
+        html += "<p><b>OPENAI_API_KEY:</b> ❌ 找不到 (None)</p>"
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    user_message = event.message.text
-    
-    try:
-        # 呼叫 OpenAI API
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "你是一個在台灣的有用AI助理，請用繁體中文回答。"},
-                {"role": "user", "content": user_message}
-            ]
-        )
-        gpt_reply = response.choices[0].message.content.strip()
+    html += "<hr><p>如果顯示「找不到」，請回到 Vercel 的 Settings -> Environment Variables 再次確認變數的<b>名稱拼寫</b>和<b>值</b>是否正確，然後<b>重新部署 (Redeploy)</b>。</p>"
 
-        # 回覆 LINE 訊息
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=gpt_reply)
-        )
-    except Exception as e:
-        # 印出錯誤日誌，方便在 Vercel 後台排查問題
-        print(f"An error occurred: {e}")
-        # 傳送錯誤通知給使用者
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="抱歉，系統有點問題，請稍後再試。")
-        )
-
-# 這段是為了讓你在本機測試用，Vercel 部署時不會執行
-if __name__ == "__main__":
-    app.run(port=5001)
+    return Response(html, mimetype='text/html')
