@@ -1,71 +1,68 @@
+import json
 import os
-import sys
-from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import hmac
+import hashlib
 import openai
+import urllib.request
 
-# ——— 健壯的防呆檢查機制 ———
-# 1. 從環境中讀取所有需要的變數
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+from linebot import LineBotApi, WebhookParser
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.exceptions import InvalidSignatureError
 
-# 2. 建立一個列表來存放遺失的變數名稱
-missing_vars = []
-if not LINE_CHANNEL_ACCESS_TOKEN:
-    missing_vars.append("LINE_CHANNEL_ACCESS_TOKEN")
-if not LINE_CHANNEL_SECRET:
-    missing_vars.append("LINE_CHANNEL_SECRET")
-if not OPENAI_API_KEY:
-    missing_vars.append("OPENAI_API_KEY")
+# 環境變數
+CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 3. 如果有任何變數遺失，就拋出一個清晰的錯誤並停止程式
-if missing_vars:
-    raise ValueError(f"FATAL ERROR: 以下環境變數遺失或為空: {', '.join(missing_vars)}")
-# ——— 檢查結束 ———
+# 驗證
+if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, OPENAI_API_KEY]):
+    raise Exception("必要環境變數未設定")
 
-# --- 如果程式能跑到這裡，代表所有變數都已正確讀取 ---
-# 初始化 Flask 應用
-app = Flask(__name__)
-
-# 初始化 LINE Bot API 和 Webhook Handler
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
-# 設定 OpenAI API 金鑰
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+parser = WebhookParser(CHANNEL_SECRET)
 openai.api_key = OPENAI_API_KEY
 
-@app.route("/", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
+# Vercel handler
+def handler(request, response):
+    if request.method == "GET":
+        response.status_code = 200
+        response.body = b"OK"
+        return
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    user_message = event.message.text
+    if request.method != "POST":
+        response.status_code = 405
+        response.body = b"Method Not Allowed"
+        return
+
+    signature = request.headers.get("x-line-signature", "")
+    body = request.body.decode("utf-8")
+
     try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "你是一個在台灣的有用AI助理，請用繁體中文回答。"},
-                {"role": "user", "content": user_message}
-            ]
-        )
-        gpt_reply = response.choices[0].message.content.strip()
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=gpt_reply)
-        )
-    except Exception as e:
-        app.logger.error(f"Error: {e}")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="抱歉，我現在有點問題，請稍後再試。")
-        )
+        events = parser.parse(body, signature)
+    except InvalidSignatureError:
+        response.status_code = 400
+        response.body = b"Invalid signature"
+        return
+
+    for event in events:
+        if isinstance(event, MessageEvent) and isinstance(event.message, TextMessage):
+            user_msg = event.message.text
+            try:
+                ai_response = openai.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "你是一個在台灣的有用AI助理，請用繁體中文回答。"},
+                        {"role": "user", "content": user_msg}
+                    ]
+                )
+                reply_text = ai_response.choices[0].message.content.strip()
+            except Exception as e:
+                reply_text = "抱歉，我現在有點問題，請稍後再試。"
+
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=reply_text)
+            )
+
+    response.status_code = 200
+    response.body = b"OK"
