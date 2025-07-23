@@ -1,7 +1,6 @@
 const line = require('@line/bot-sdk');
 const axios = require('axios');
 
-// LINE config
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
@@ -9,25 +8,28 @@ const config = {
 
 const client = new line.Client(config);
 
-// ¥D webhook handler
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method Not Allowed');
-  }
+  try {
+    if (req.method !== 'POST') {
+      return res.status(405).send('Method Not Allowed');
+    }
 
-  const events = req.body.events;
+    const events = req.body.events;
 
-  // ³B²z¦h­Ó¨Æ¥ó¡]³q±`¥u·|¤@­Ó¡^
-  const results = await Promise.all(events.map(async (event) => {
-    if (event.type === 'message' && event.message.type === 'text') {
-      const userText = event.message.text;
-
+    const results = await Promise.all(events.map(async (event) => {
       try {
-        // ©I¥s OpenAI ChatGPT
-        const aiRes = await axios.post(
+        if (event.type !== 'message' || event.message.type !== 'text') {
+          // éæ–‡å­—è¨Šæ¯ï¼Œä¸è™•ç†
+          return;
+        }
+
+        const userText = event.message.text;
+
+        // å‘¼å« OpenAI
+        const openaiRes = await axios.post(
           'https://api.openai.com/v1/chat/completions',
           {
-            model: 'gpt-4',
+            model: 'gpt-3.5-turbo',
             messages: [{ role: 'user', content: userText }],
           },
           {
@@ -38,22 +40,28 @@ export default async function handler(req, res) {
           }
         );
 
-        const aiReply = aiRes.data.choices[0].message.content;
+        const reply = openaiRes.data.choices[0].message.content;
 
-        // ¦^¶Ç°T®§¨ì LINE
-        return client.replyMessage(event.replyToken, {
+        await client.replyMessage(event.replyToken, {
           type: 'text',
-          text: aiReply,
+          text: reply,
         });
+
       } catch (err) {
-        console.error('OpenAI API Error:', err.response?.data || err.message);
-        return client.replyMessage(event.replyToken, {
+        console.error('ğŸ’¥ å–®ä¸€äº‹ä»¶è™•ç†éŒ¯èª¤ï¼š', err.response?.data || err.message);
+
+        // å›å‚³éŒ¯èª¤è¨Šæ¯åˆ° LINE
+        await client.replyMessage(event.replyToken, {
           type: 'text',
-          text: '©êºp¡A§Úªº¤j¸£¥´µ²¤F ½Ğµy«á¦A¸Õ¡I',
+          text: 'âš ï¸ æ©Ÿå™¨äººæ•…éšœäº†ï¼Œè«‹ç¨å¾Œå†è©¦',
         });
       }
-    }
-  }));
+    }));
 
-  res.status(200).json({ status: 'ok' });
+    res.status(200).json({ status: 'ok' });
+
+  } catch (err) {
+    console.error('ğŸ’¥ ç¸½ webhook éŒ¯èª¤ï¼š', err.response?.data || err.message);
+    res.status(200).json({ status: 'fail, but LINE needs 200' }); // ç‚ºäº†é¿å… LINE é‡é€
+  }
 }
